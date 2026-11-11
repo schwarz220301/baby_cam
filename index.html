@@ -134,7 +134,10 @@
   .meter-label { display: flex; justify-content: space-between; font-size: 13px; color: var(--dim); margin-bottom: -6px; }
   .vbtns { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 10px; }
   .vbtns button { background: rgba(27,35,64,.85); }
-  #soundBtn.on { border-color: var(--moon); color: var(--moon); }
+  #soundBtn.on, #boostBtn.on { border-color: var(--moon); color: var(--moon); }
+  .boost-row { display: grid; grid-template-columns: auto 1fr 2.5em; align-items: center; gap: 12px; font-size: 14px; color: var(--dim); }
+  .boost-row input { width: 100%; accent-color: var(--moon); height: 32px; }
+  #boostVal { text-align: right; color: var(--moon); font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
@@ -212,9 +215,14 @@
   <div class="bottom-bar">
     <div class="meter-label"><span>房間聲音</span><span id="meterHint">開啟聲音後顯示</span></div>
     <div class="meter"><div id="meter"></div></div>
+    <div class="boost-row" id="boostRow" hidden>
+      <span>看清暗處</span>
+      <input type="range" id="boostRange" min="0" max="100" step="5" value="0" aria-label="看清暗處的強度">
+      <span id="boostVal">0</span>
+    </div>
     <div class="vbtns">
       <button id="soundBtn" type="button">開啟聲音</button>
-      <button id="boostBtn" type="button">增亮：關</button>
+      <button id="boostBtn" type="button">暗處：關</button>
       <button id="viewExit" type="button">離開</button>
     </div>
   </div>
@@ -562,13 +570,27 @@
     tick();
   }
 
-  // ---------- 夜間增亮（觀看端濾鏡，不影響相機） ----------
-  const BOOST = [['關', ''], ['中', 'brightness(1.5) contrast(1.15)'], ['強', 'brightness(2.2) contrast(1.3) saturate(.6)']];
+  // ---------- 看清暗處（觀看端濾鏡，不影響相機） ----------
+  // 用「降低對比」而不是「提高亮度」：暗部被往上拉、亮部往下壓，
+  // 白色被子不會先爆白，暗處的臉和身體才看得到（等同 iOS 照片的對比往負調）。
+  // 強度 100 時：純黑 → 約 33% 灰，純白 → 約 87%。
+  const boostRange = $('#boostRange');
+  function applyBoost(v) {
+    const k = clamp(v, 0, 100) / 100;
+    remote.style.filter = k ? 'contrast(' + (1 - 0.55 * k).toFixed(3) + ') brightness(' + (1 + 0.2 * k).toFixed(3) + ')' : '';
+    $('#boostVal').textContent = v;
+    $('#boostBtn').textContent = v ? '暗處 ' + v : '暗處：關';
+    $('#boostBtn').classList.toggle('on', v > 0);
+    view.boost = v;
+    save('bm-boost', String(v));
+  }
+  boostRange.addEventListener('input', () => applyBoost(+boostRange.value));
   $('#boostBtn').onclick = () => {
-    view.boost = (view.boost + 1) % BOOST.length;
-    remote.style.filter = BOOST[view.boost][1];
-    $('#boostBtn').textContent = '增亮：' + BOOST[view.boost][0];
+    const row = $('#boostRow');
+    row.hidden = !row.hidden;
+    if (!row.hidden && view.boost === 0) { boostRange.value = 70; applyBoost(70); }
   };
+  { const v = parseInt(load('bm-boost'), 10); if (v > 0) { boostRange.value = v; applyBoost(v); } }
 
   // ---------- 雙指放大、單指拖移、連點兩下還原 ----------
   const stage = $('#stage');
