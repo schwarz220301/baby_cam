@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#12182a">
+<title>寶寶監視器（驗證版）</title>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<style>
+  /* 夜間用：暖色文字、低藍光，半夜看手機不刺眼 */
+  :root {
+    --night: #12182a;
+    --panel: #1b2340;
+    --line: #2c3660;
+    --text: #eadfc8;
+    --moon: #f2cf94;
+    --dim: #9298b0;
+    --ok: #9fd3ae;
+    --wait: #e6c77a;
+    --bad: #e9a08f;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--night);
+    color: var(--text);
+    font-family: -apple-system, "PingFang TC", "Noto Sans TC", "Helvetica Neue", sans-serif;
+    font-size: 17px;
+    line-height: 1.55;
+    -webkit-user-select: none; user-select: none;
+    overscroll-behavior: none;
+  }
+  button {
+    font: inherit; color: var(--text);
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 12px 16px; min-height: 48px;
+    cursor: pointer;
+  }
+  button:active { background: var(--line); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--moon); outline-offset: 2px; }
+
+  /* ---------- 首頁 ---------- */
+  #home {
+    min-height: 100%;
+    padding: calc(env(safe-area-inset-top, 0px) + 40px) 24px calc(env(safe-area-inset-bottom, 0px) + 32px);
+    max-width: 480px; margin: 0 auto;
+    display: flex; flex-direction: column; gap: 28px;
+  }
+  .moon {
+    width: 64px; height: 64px; border-radius: 50%;
+    box-shadow: inset -16px -6px 0 0 var(--moon);
+    transform: rotate(-20deg);
+  }
+  h1 { font-size: 34px; line-height: 1.2; margin: 0; font-weight: 700; color: var(--moon); letter-spacing: .02em; }
+  .lede { margin: 6px 0 0; color: var(--dim); }
+  .field label { display: block; color: var(--dim); font-size: 15px; margin-bottom: 6px; }
+  .code-row { display: flex; gap: 10px; }
+  .code-row input {
+    flex: 1; min-width: 0; font: inherit; font-size: 22px; letter-spacing: .12em;
+    color: var(--moon); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 10px 14px; -webkit-user-select: text; user-select: text;
+  }
+  .hint { font-size: 14px; color: var(--dim); margin: 8px 0 0; }
+  .roles { display: grid; gap: 14px; }
+  .role { text-align: left; padding: 18px 20px; border-radius: 20px; display: grid; gap: 2px; }
+  .role strong { font-size: 20px; color: var(--moon); font-weight: 600; }
+  .role span { color: var(--dim); font-size: 15px; }
+  .warn { border: 1px solid var(--bad); color: var(--bad); border-radius: 14px; padding: 12px 14px; font-size: 15px; }
+
+  /* ---------- 狀態 ---------- */
+  .status { display: flex; align-items: center; gap: 8px; font-size: 15px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); flex: none; }
+  .status[data-k="ok"] .dot { background: var(--ok); }
+  .status[data-k="wait"] .dot { background: var(--wait); animation: pulse 1.4s ease-in-out infinite; }
+  .status[data-k="bad"] .dot { background: var(--bad); }
+  @keyframes pulse { 50% { opacity: .3; } }
+  @media (prefers-reduced-motion: reduce) { .status .dot { animation: none !important; } }
+
+  /* ---------- 相機端（iPad） ---------- */
+  #camera {
+    height: 100%;
+    display: grid; grid-template-rows: minmax(0, 1fr) auto;
+    padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px);
+  }
+  @media (orientation: landscape) and (min-width: 700px) {
+    #camera { grid-template-rows: none; grid-template-columns: minmax(0, 1fr) 340px; }
+  }
+  .preview-wrap { position: relative; background: #000; min-height: 0; overflow: hidden; }
+  #preview { width: 100%; height: 100%; object-fit: contain; display: block; }
+  #preview.mirror { transform: scaleX(-1); }
+  .track-info { position: absolute; left: 12px; bottom: 10px; font-size: 13px; color: var(--dim); background: rgba(18,24,42,.7); padding: 2px 8px; border-radius: 8px; }
+  .cam-panel { padding: 18px 18px 20px; display: grid; gap: 16px; align-content: start; overflow-y: auto; }
+  .viewers { font-size: 28px; color: var(--moon); line-height: 1.2; }
+  .viewers small { display: block; font-size: 14px; color: var(--dim); }
+  .pair { display: flex; gap: 14px; align-items: center; }
+  #qr { background: #fff; padding: 6px; border-radius: 10px; width: 116px; height: 116px; flex: none; }
+  #qr svg { width: 100%; height: 100%; display: block; }
+  .pair p { margin: 0; font-size: 14px; color: var(--dim); }
+  .pair .code { font-size: 22px; color: var(--moon); letter-spacing: .12em; }
+  .btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .btns .wide { grid-column: span 2; }
+  #blackout {
+    position: fixed; inset: 0; background: #000; z-index: 50;
+    display: flex; align-items: flex-end; justify-content: center;
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
+    color: #2a2a2a; font-size: 14px;
+  }
+
+  /* ---------- 觀看端（手機） ---------- */
+  #viewer { position: fixed; inset: 0; background: #000; }
+  #stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; }
+  #remote { width: 100%; height: 100%; object-fit: contain; display: block; transform-origin: center center; will-change: transform; }
+  .top-bar {
+    position: absolute; left: 0; right: 0; top: 0; z-index: 5;
+    padding: calc(env(safe-area-inset-top, 0px) + 10px) 16px 18px;
+    background: linear-gradient(rgba(18,24,42,.85), rgba(18,24,42,0));
+    pointer-events: none;
+  }
+  #stats { font-size: 13px; color: var(--dim); margin-top: 2px; font-variant-numeric: tabular-nums; white-space: pre-wrap; }
+  #zoomTag { position: absolute; right: 16px; top: calc(env(safe-area-inset-top, 0px) + 10px); font-size: 14px; color: var(--moon); z-index: 6; }
+  .bottom-bar {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 5;
+    padding: 22px 16px calc(env(safe-area-inset-bottom, 0px) + 14px);
+    background: linear-gradient(rgba(18,24,42,0), rgba(18,24,42,.9));
+    display: grid; gap: 12px;
+  }
+  .meter { height: 6px; border-radius: 3px; background: rgba(255,255,255,.08); overflow: hidden; }
+  #meter { height: 100%; background: var(--moon); transform-origin: left center; transform: scaleX(0); transition: transform 80ms linear; }
+  .meter-label { display: flex; justify-content: space-between; font-size: 13px; color: var(--dim); margin-bottom: -6px; }
+  .vbtns { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 10px; }
+  .vbtns button { background: rgba(27,35,64,.85); }
+  #soundBtn.on { border-color: var(--moon); color: var(--moon); }
+</style>
+</head>
+<body>
+
+<!-- 首頁 -->
+<main id="home" class="screen">
+  <div>
+    <div class="moon" aria-hidden="true"></div>
+  </div>
+  <div>
+    <h1>寶寶監視器</h1>
+    <p class="lede">驗證版。iPad 放在床邊當相機，手機在同一個 Wi‑Fi 裡觀看。</p>
+  </div>
+
+  <div id="insecure" class="warn" hidden>這個網址不是 HTTPS，Safari 不會開放相機。請改用 GitHub Pages 的 https 網址開啟。</div>
+
+  <div class="field">
+    <label for="code">配對代碼（兩台要一樣）</label>
+    <div class="code-row">
+      <input id="code" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="20">
+      <button id="newCode" type="button">換一組</button>
+    </div>
+    <p class="hint">代碼只用來讓兩台找到彼此。畫面只走家裡 Wi‑Fi 直連，不會經過網路。</p>
+  </div>
+
+  <div class="roles">
+    <button class="role" id="asCamera" type="button">
+      <strong>這台當相機</strong>
+      <span>放在嬰兒床旁的 iPad，畫面要保持開著</span>
+    </button>
+    <button class="role" id="asViewer" type="button">
+      <strong>這台用來看</strong>
+      <span>手機或其他裝置，可以多台同時看</span>
+    </button>
+  </div>
+</main>
+
+<!-- 相機端 -->
+<section id="camera" class="screen" hidden>
+  <div class="preview-wrap">
+    <video id="preview" autoplay playsinline muted></video>
+    <div class="track-info" id="trackInfo"></div>
+  </div>
+  <div class="cam-panel">
+    <div class="status" id="camStatus" data-k="wait"><span class="dot"></span><span class="txt">準備中</span></div>
+    <div class="viewers" id="viewerCount">0 台在看<small>手機掃右邊的條碼就能連上</small></div>
+    <div class="pair">
+      <div id="qr"></div>
+      <div>
+        <p>配對代碼</p>
+        <div class="code" id="camCode"></div>
+        <p>或在手機首頁輸入同一組代碼</p>
+      </div>
+    </div>
+    <div class="btns">
+      <button id="flipBtn" type="button">切換鏡頭</button>
+      <button id="qualityBtn" type="button">畫質 720p</button>
+      <button id="blackBtn" class="wide" type="button">關閉畫面顯示（繼續拍攝）</button>
+      <button id="camExit" class="wide" type="button">停止相機</button>
+    </div>
+  </div>
+</section>
+<div id="blackout" hidden>連點兩下回到控制畫面。記得把 iPad 亮度調到最低。</div>
+
+<!-- 觀看端 -->
+<section id="viewer" class="screen" hidden>
+  <div id="stage">
+    <video id="remote" autoplay playsinline muted></video>
+  </div>
+  <div class="top-bar">
+    <div class="status" id="viewStatus" data-k="wait"><span class="dot"></span><span class="txt">尋找相機…</span></div>
+    <div id="stats"></div>
+  </div>
+  <div id="zoomTag" hidden></div>
+  <div class="bottom-bar">
+    <div class="meter-label"><span>房間聲音</span><span id="meterHint">開啟聲音後顯示</span></div>
+    <div class="meter"><div id="meter"></div></div>
+    <div class="vbtns">
+      <button id="soundBtn" type="button">開啟聲音</button>
+      <button id="boostBtn" type="button">增亮：關</button>
+      <button id="viewExit" type="button">離開</button>
+    </div>
+  </div>
+</section>
+
+<script>
+(() => {
+  'use strict';
+  const PREFIX = 'bmon-v1-';
+  // 不給 STUN/TURN：只會用區網位址連線，等於強制「同一個 Wi‑Fi 才連得上」
+  const PEER_OPTS = { debug: 1, config: { iceServers: [] } };
+  const QUALITY = { '480': [854, 480, 800], '720': [1280, 720, 1500], '1080': [1920, 1080, 3000] }; // 寬, 高, 上限 kbps
+
+  const $ = s => document.querySelector(s);
+  const show = id => document.querySelectorAll('.screen').forEach(el => { el.hidden = el.id !== id; });
+  const save = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+  const load = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const cleanCode = v => (v || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
+  function randCode() {
+    const a = 'abcdefghjkmnpqrstuvwxyz23456789';
+    let s = '';
+    for (const b of crypto.getRandomValues(new Uint8Array(6))) s += a[b % a.length];
+    return s;
+  }
+  function setStatus(el, text, kind) { el.dataset.k = kind; el.querySelector('.txt').textContent = text; }
+  function whenPC(call, cb, n = 0) {
+    if (call.peerConnection) cb(call.peerConnection);
+    else if (n < 50) setTimeout(() => whenPC(call, cb, n + 1), 100);
+  }
+
+  // ---------- 保持螢幕不熄 ----------
+  let wakeLock = null;
+  async function keepAwake() {
+    try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+  }
+  function releaseAwake() { try { wakeLock && wakeLock.release(); } catch (e) {} wakeLock = null; }
+
+  // ---------- 首頁 ----------
+  const codeInput = $('#code');
+  let code = '';
+  function setCode(c) { code = cleanCode(c) || randCode(); codeInput.value = code; save('bm-code', code); }
+  setCode(load('bm-code'));
+  codeInput.addEventListener('change', () => setCode(codeInput.value));
+  $('#newCode').onclick = () => setCode(randCode());
+  if (!window.isSecureContext) $('#insecure').hidden = false;
+  $('#asCamera').onclick = () => { setCode(codeInput.value); startCamera(); };
+  $('#asViewer').onclick = () => { setCode(codeInput.value); startViewer(); };
+
+  // ======================================================
+  // 相機端
+  // ======================================================
+  const cam = { peer: null, stream: null, facing: 'environment', quality: '720', viewers: new Map(), retry: null, active: false };
+  const camStatus = $('#camStatus');
+
+  function openStream() {
+    const [w, h] = QUALITY[cam.quality];
+    return navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: cam.facing }, width: { ideal: w }, height: { ideal: h }, frameRate: { ideal: 30, max: 30 } },
+      // 關掉降噪：避免哭聲被當成雜音壓掉
+      audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: true }
+    });
+  }
+
+  async function startCamera() {
+    show('camera'); cam.active = true;
+    $('#camCode').textContent = code;
+    drawQR();
+    try { cam.stream = await openStream(); }
+    catch (e) { setStatus(camStatus, '無法開啟相機（' + e.name + '）：請在 Safari 允許相機與麥克風', 'bad'); return; }
+    attachPreview();
+    camConnect();
+    keepAwake();
+  }
+
+  function attachPreview() {
+    const v = $('#preview');
+    v.srcObject = cam.stream;
+    v.classList.toggle('mirror', cam.facing === 'user');
+    const t = cam.stream.getVideoTracks()[0];
+    const s = t ? t.getSettings() : {};
+    $('#trackInfo').textContent = (s.width ? s.width + '×' + s.height : '') + (s.frameRate ? '  ' + Math.round(s.frameRate) + ' fps' : '');
+  }
+
+  function camConnect() {
+    clearTimeout(cam.retry);
+    if (cam.peer) { try { cam.peer.destroy(); } catch (e) {} }
+    cam.viewers.clear(); updateViewerCount();
+    setStatus(camStatus, '連線到配對服務…', 'wait');
+    const p = new Peer(PREFIX + code, PEER_OPTS);
+    cam.peer = p;
+
+    p.on('open', () => { if (p === cam.peer) setStatus(camStatus, '等待手機連線', 'ok'); });
+
+    p.on('connection', conn => {
+      conn.on('open', () => {
+        if (!cam.stream) return;
+        const call = p.call(conn.peer, cam.stream);
+        const v = { conn, call, connected: false };
+        cam.viewers.set(conn.peer, v);
+        whenPC(call, pc => {
+          pc.addEventListener('connectionstatechange', () => {
+            v.connected = pc.connectionState === 'connected';
+            if (v.connected) applyBitrate(pc);
+            if (pc.connectionState === 'failed' || pc.connectionState === 'closed') dropViewer(conn.peer);
+            updateViewerCount();
+          });
+        });
+        call.on('close', () => dropViewer(conn.peer));
+        call.on('error', () => dropViewer(conn.peer));
+        updateViewerCount();
+      });
+      conn.on('close', () => dropViewer(conn.peer));
+    });
+
+    p.on('disconnected', () => {
+      if (p !== cam.peer || p.destroyed) return;
+      // 跟配對服務斷線不影響已連上的手機，只影響新的連線
+      setStatus(camStatus, '配對服務斷線，重新連線中（已連上的手機不受影響）', 'wait');
+      setTimeout(() => { if (p === cam.peer && !p.destroyed) p.reconnect(); }, 2000);
+    });
+
+    p.on('error', err => {
+      if (p !== cam.peer || err.type === 'peer-unavailable') return;
+      if (err.type === 'unavailable-id') setStatus(camStatus, '這組代碼已被另一台相機使用，5 秒後重試', 'bad');
+      else setStatus(camStatus, '連線錯誤（' + err.type + '），5 秒後重試', 'bad');
+      cam.retry = setTimeout(() => { if (cam.active) camConnect(); }, 5000);
+    });
+  }
+
+  function dropViewer(id) {
+    const v = cam.viewers.get(id);
+    if (!v) return;
+    cam.viewers.delete(id);
+    try { v.call.close(); } catch (e) {}
+    try { v.conn.close(); } catch (e) {}
+    updateViewerCount();
+  }
+
+  function updateViewerCount() {
+    const n = [...cam.viewers.values()].filter(v => v.connected).length;
+    $('#viewerCount').firstChild.textContent = n + ' 台在看';
+  }
+
+  function applyBitrate(pc) {
+    const kbps = QUALITY[cam.quality][2];
+    pc.getSenders().forEach(s => {
+      if (!s.track || s.track.kind !== 'video') return;
+      const prm = s.getParameters();
+      if (!prm.encodings || !prm.encodings.length) prm.encodings = [{}];
+      prm.encodings[0].maxBitrate = kbps * 1000;
+      s.setParameters(prm).catch(() => {});
+    });
+  }
+
+  // 換鏡頭或畫質：重新開相機，再把新的軌道換進每一條既有連線，手機端不用重連
+  async function restartStream() {
+    if (cam.stream) cam.stream.getTracks().forEach(t => t.stop());
+    try { cam.stream = await openStream(); }
+    catch (e) { setStatus(camStatus, '無法重新開啟相機（' + e.name + '）', 'bad'); return; }
+    attachPreview();
+    for (const v of cam.viewers.values()) {
+      const pc = v.call.peerConnection;
+      if (!pc) continue;
+      for (const s of pc.getSenders()) {
+        const kind = s.track ? s.track.kind : null;
+        const t = kind && cam.stream.getTracks().find(x => x.kind === kind);
+        if (t) await s.replaceTrack(t).catch(() => {});
+      }
+      applyBitrate(pc);
+    }
+  }
+
+  function drawQR() {
+    const url = location.origin + location.pathname + '#view=' + code;
+    try {
+      const qr = qrcode(0, 'M');
+      qr.addData(url); qr.make();
+      $('#qr').innerHTML = qr.createSvgTag(4, 0);
+    } catch (e) { $('#qr').textContent = ''; }
+  }
+
+  $('#flipBtn').onclick = () => { cam.facing = cam.facing === 'environment' ? 'user' : 'environment'; restartStream(); };
+  $('#qualityBtn').onclick = () => {
+    const order = ['480', '720', '1080'];
+    cam.quality = order[(order.indexOf(cam.quality) + 1) % order.length];
+    $('#qualityBtn').textContent = '畫質 ' + cam.quality + 'p';
+    restartStream();
+  };
+
+  // 黑畫面：相機繼續拍，只是不顯示，連點兩下回來
+  const blackout = $('#blackout');
+  let lastTapB = 0;
+  $('#blackBtn').onclick = () => { blackout.hidden = false; };
+  blackout.addEventListener('click', () => {
+    const now = Date.now();
+    if (now - lastTapB < 400) { blackout.hidden = true; lastTapB = 0; } else lastTapB = now;
+  });
+
+  $('#camExit').onclick = () => {
+    cam.active = false; clearTimeout(cam.retry);
+    try { cam.peer && cam.peer.destroy(); } catch (e) {}
+    cam.peer = null; cam.viewers.clear();
+    if (cam.stream) cam.stream.getTracks().forEach(t => t.stop());
+    cam.stream = null; releaseAwake();
+    show('home');
+  };
+
+  // ======================================================
+  // 觀看端
+  // ======================================================
+  const view = { peer: null, call: null, retry: null, active: false, gen: 0, stats: null, last: null,
+                 stream: null, soundOn: false, ctx: null, src: null, analyser: null, looping: false, boost: 0 };
+  const viewStatus = $('#viewStatus');
+  const remote = $('#remote');
+
+  function startViewer() { show('viewer'); view.active = true; viewConnect(); keepAwake(); }
+
+  function cleanupViewer() {
+    view.gen++;
+    stopStats();
+    try { view.call && view.call.close(); } catch (e) {}
+    try { view.peer && view.peer.destroy(); } catch (e) {}
+    view.call = null; view.peer = null;
+  }
+
+  function scheduleRetry(gen, msg) {
+    if (gen !== view.gen || !view.active || view.retry) return;
+    setStatus(viewStatus, msg + '，3 秒後重試', 'bad');
+    stopStats();
+    view.retry = setTimeout(() => { view.retry = null; viewConnect(); }, 3000);
+  }
+
+  function viewConnect() {
+    clearTimeout(view.retry); view.retry = null;
+    cleanupViewer();
+    const gen = view.gen;
+    setStatus(viewStatus, '尋找相機…', 'wait');
+    const p = new Peer(PEER_OPTS);
+    view.peer = p;
+
+    p.on('open', () => {
+      if (gen !== view.gen) return;
+      const c = p.connect(PREFIX + code, { reliable: true });
+      c.on('open', () => { if (gen === view.gen && !view.call) setStatus(viewStatus, '找到相機，等待畫面…', 'wait'); });
+      c.on('close', () => scheduleRetry(gen, '相機已離線'));
+    });
+
+    p.on('call', call => {
+      if (gen !== view.gen) return;
+      view.call = call;
+      call.answer(); // 只收不送
+      call.on('stream', s => {
+        if (gen !== view.gen) return;
+        if (remote.srcObject !== s) { remote.srcObject = s; remote.play().catch(() => {}); }
+        view.stream = s;
+        setStatus(viewStatus, '畫面已連線', 'ok');
+        if (view.soundOn) attachMeter();
+        startStats();
+      });
+      call.on('close', () => scheduleRetry(gen, '畫面中斷'));
+      whenPC(call, pc => pc.addEventListener('connectionstatechange', () => {
+        if (pc.connectionState === 'failed') scheduleRetry(gen, '連線失敗，確認兩台在同一個 Wi‑Fi');
+        if (pc.connectionState === 'disconnected') setStatus(viewStatus, '訊號不穩，等待恢復…', 'wait');
+        if (pc.connectionState === 'connected') setStatus(viewStatus, '畫面已連線', 'ok');
+      }));
+    });
+
+    p.on('error', err => {
+      if (err.type === 'peer-unavailable') scheduleRetry(gen, '找不到相機：確認 iPad 已開相機頁、代碼相同');
+      else scheduleRetry(gen, '連線錯誤（' + err.type + '）');
+    });
+    p.on('disconnected', () => { if (!view.call) scheduleRetry(gen, '配對服務斷線'); });
+  }
+
+  // ---------- 連線數據：用來判斷是否真的區網直連、畫質與延遲 ----------
+  function startStats() { stopStats(); view.last = null; view.stats = setInterval(readStats, 1000); }
+  function stopStats() { clearInterval(view.stats); view.stats = null; }
+  async function readStats() {
+    const pc = view.call && view.call.peerConnection;
+    if (!pc) return;
+    const r = await pc.getStats();
+    let inV = null, pair = null, selId = null;
+    r.forEach(s => {
+      if (s.type === 'inbound-rtp' && s.kind === 'video') inV = s;
+      if (s.type === 'transport' && s.selectedCandidatePairId) selId = s.selectedCandidatePairId;
+    });
+    if (selId) pair = r.get(selId);
+    if (!pair) r.forEach(s => { if (s.type === 'candidate-pair' && s.state === 'succeeded' && (s.nominated || s.selected)) pair = s; });
+
+    const parts = [];
+    if (pair) {
+      const l = r.get(pair.localCandidateId), rm = r.get(pair.remoteCandidateId);
+      const lan = l && rm && l.candidateType === 'host' && rm.candidateType === 'host';
+      parts.push(lan ? '區網直連' : '路徑：' + (l ? l.candidateType : '未知'));
+      if (pair.currentRoundTripTime != null) parts.push('來回 ' + Math.round(pair.currentRoundTripTime * 1000) + ' ms');
+    }
+    if (inV) {
+      if (inV.frameWidth) parts.push(inV.frameWidth + '×' + inV.frameHeight);
+      if (inV.framesPerSecond != null) parts.push(Math.round(inV.framesPerSecond) + ' fps');
+      if (view.last && inV.timestamp > view.last.t) parts.push(Math.round((inV.bytesReceived - view.last.b) * 8 / (inV.timestamp - view.last.t)) + ' kbps');
+      view.last = { b: inV.bytesReceived, t: inV.timestamp };
+      if (inV.jitterBufferEmittedCount) parts.push('緩衝 ' + Math.round(inV.jitterBufferDelay / inV.jitterBufferEmittedCount * 1000) + ' ms');
+      if (inV.packetsLost) parts.push('掉包 ' + inV.packetsLost);
+    }
+    $('#stats').textContent = parts.join('　');
+  }
+
+  // ---------- 聲音與音量條 ----------
+  $('#soundBtn').onclick = async () => {
+    view.soundOn = !view.soundOn;
+    remote.muted = !view.soundOn;
+    try { await remote.play(); } catch (e) {}
+    if (view.soundOn) attachMeter();
+    $('#soundBtn').textContent = view.soundOn ? '聲音已開' : '開啟聲音';
+    $('#soundBtn').classList.toggle('on', view.soundOn);
+    $('#meterHint').textContent = view.soundOn ? '' : '開啟聲音後顯示';
+  };
+  function attachMeter() {
+    if (!view.stream || !view.stream.getAudioTracks().length) return;
+    try {
+      if (!view.ctx) view.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      view.ctx.resume();
+      if (view.src) { try { view.src.disconnect(); } catch (e) {} }
+      view.src = view.ctx.createMediaStreamSource(view.stream);
+      view.analyser = view.ctx.createAnalyser();
+      view.analyser.fftSize = 512;
+      view.src.connect(view.analyser); // 只分析，不再播放一次
+      if (!view.looping) meterLoop();
+    } catch (e) {}
+  }
+  function meterLoop() {
+    view.looping = true;
+    const buf = new Uint8Array(512);
+    const meter = $('#meter');
+    const tick = () => {
+      if (view.analyser && view.soundOn) {
+        view.analyser.getByteTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) { const d = (buf[i] - 128) / 128; sum += d * d; }
+        meter.style.transform = 'scaleX(' + clamp(Math.sqrt(sum / buf.length) * 4, 0, 1) + ')';
+      } else meter.style.transform = 'scaleX(0)';
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+
+  // ---------- 夜間增亮（觀看端濾鏡，不影響相機） ----------
+  const BOOST = [['關', ''], ['中', 'brightness(1.5) contrast(1.15)'], ['強', 'brightness(2.2) contrast(1.3) saturate(.6)']];
+  $('#boostBtn').onclick = () => {
+    view.boost = (view.boost + 1) % BOOST.length;
+    remote.style.filter = BOOST[view.boost][1];
+    $('#boostBtn').textContent = '增亮：' + BOOST[view.boost][0];
+  };
+
+  // ---------- 雙指放大、單指拖移、連點兩下還原 ----------
+  const stage = $('#stage');
+  const z = { s: 1, x: 0, y: 0 };
+  let pinch = null, pan = null, lastTap = 0;
+  const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  function applyZoom() {
+    const r = stage.getBoundingClientRect();
+    const mx = (z.s - 1) * r.width / 2, my = (z.s - 1) * r.height / 2;
+    z.x = clamp(z.x, -mx, mx); z.y = clamp(z.y, -my, my);
+    remote.style.transform = 'translate(' + z.x + 'px,' + z.y + 'px) scale(' + z.s + ')';
+    const tag = $('#zoomTag');
+    tag.hidden = z.s <= 1.01;
+    tag.textContent = '×' + z.s.toFixed(1);
+  }
+  stage.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (e.touches.length === 2) { pinch = { d: dist(e.touches), s: z.s }; pan = null; }
+    else if (e.touches.length === 1) {
+      const now = Date.now();
+      if (now - lastTap < 300) { z.s = 1; z.x = 0; z.y = 0; applyZoom(); lastTap = 0; return; }
+      lastTap = now;
+      pan = { x: e.touches[0].clientX, y: e.touches[0].clientY, ox: z.x, oy: z.y };
+    }
+  }, { passive: false });
+  stage.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (pinch && e.touches.length === 2) { z.s = clamp(pinch.s * dist(e.touches) / pinch.d, 1, 6); applyZoom(); }
+    else if (pan && e.touches.length === 1 && z.s > 1) {
+      z.x = pan.ox + e.touches[0].clientX - pan.x; z.y = pan.oy + e.touches[0].clientY - pan.y; applyZoom();
+    }
+  }, { passive: false });
+  stage.addEventListener('touchend', e => { if (e.touches.length === 0) { pinch = null; pan = null; } });
+  window.addEventListener('resize', applyZoom);
+
+  $('#viewExit').onclick = () => {
+    view.active = false; clearTimeout(view.retry); view.retry = null;
+    cleanupViewer();
+    remote.srcObject = null; view.stream = null;
+    releaseAwake();
+    show('home');
+  };
+
+  // ---------- 從背景回來：重新保持亮螢幕、必要時重開相機或重連 ----------
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (cam.active) {
+      keepAwake();
+      const dead = !cam.stream || cam.stream.getTracks().some(t => t.readyState === 'ended' || t.muted);
+      if (dead) restartStream();
+      if (cam.peer && cam.peer.disconnected && !cam.peer.destroyed) cam.peer.reconnect();
+    }
+    if (view.active) {
+      keepAwake();
+      const pc = view.call && view.call.peerConnection;
+      if (!pc || pc.connectionState !== 'connected') viewConnect();
+      else remote.play().catch(() => {});
+    }
+  });
+
+  // 掃 QR 開啟：#view=代碼 直接進觀看
+  const m = location.hash.match(/view=([a-z0-9]+)/i);
+  if (m) { setCode(m[1]); history.replaceState(null, '', location.pathname); startViewer(); }
+})();
+</script>
+</body>
+</html>
